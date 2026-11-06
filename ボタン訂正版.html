@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>広告の閉じやすさに関する実験</title>
+
+<style>
+  body {
+    font-family: sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+    background: #f5f5f5;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  #participant {
+    font-weight: bold;
+    margin: 15px;
+  }
+
+  #startArea, #resultArea, #finishArea {
+    margin-top: 30px;
+  }
+
+  button {
+    font-size: 18px;
+    padding: 12px 24px;
+    margin: 10px;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  #adArea {
+    display: none;
+    position: relative;
+    width: min(90vw, 350px);
+    height: 250px;
+    margin: 30px auto;
+    background: white;
+    border: 2px solid #888;
+    box-sizing: border-box;
+  }
+
+  #adText {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 85%;
+    font-size: 22px;
+    font-weight: bold;
+  }
+
+  #closeButton {
+    position: absolute;
+    top: 5px;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    font-size: 28px;
+    line-height: 36px;
+    border: 1px solid #555;
+    background: #eee;
+    color: black;
+  }
+
+  #closeButton.left {
+    left: 5px;
+  }
+
+  #closeButton.right {
+    right: 5px;
+  }
+
+  #progress {
+    margin-top: 20px;
+    font-size: 18px;
+  }
+
+  #resultArea, #finishArea {
+    display: none;
+  }
+
+  #message {
+    margin-top: 20px;
+    color: #444;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>広告の閉じやすさに関する実験</h1>
+
+<p id="participant"></p>
+
+<div id="startArea">
+  <p>
+    画面に表示される広告の×ボタンを押してください。<br>
+    全20回の操作を行います。
+  </p>
+  <p id="resumeMessage"></p>
+  <button id="startButton" onclick="startExperiment()">
+    実験開始
+  </button>
+</div>
+
+<div id="adArea">
+  <button id="closeButton" onclick="closeAd()">×</button>
+  <div id="adText">広告の表示例</div>
+</div>
+
+<p id="progress"></p>
+
+<div id="resultArea">
+  <h2>結果</h2>
+  <p id="resultText"></p>
+  <button onclick="nextTrial()">次へ</button>
+</div>
+
+<div id="finishArea">
+  <h2>実験終了</h2>
+  <p>20回すべての操作が終了しました。</p>
+  <p>下のボタンから実験結果を保存してください。</p>
+  <button onclick="downloadCSV()">結果をダウンロード</button>
+</div>
+
+<p id="message"></p>
+
+<script>
+// ==============================
+// 参加者番号の取得
+// ==============================
+
+const params = new URLSearchParams(location.search);
+const participantId = params.get("id");
+
+const participantElement =
+  document.getElementById("participant");
+
+const startButton =
+  document.getElementById("startButton");
+
+const validId = /^P(0[1-9]|[12][0-9]|30)$/.test(
+  participantId || ""
+);
+
+if (validId) {
+  participantElement.textContent =
+    `あなたは参加者 ${participantId} です`;
+} else {
+  participantElement.textContent =
+    "参加者番号を確認できません。専用URLを確認してください。";
+
+  startButton.disabled = true;
+}
+
+// ==============================
+// 実験データ
+// ==============================
+
+let conditions = [];
+let results = [];
+let trial = 0;
+
+let startTime = 0;
+let currentCondition = "";
+
+let currentScreen = "start";
+
+// 参加者ごとに別の保存場所を使用する
+const storageKey = "experiment_" + participantId;
+const scriptURL = "https://script.google.com/a/macros/yamaguchi-u.ac.jp/s/AKfycbwQglyZ2mBlDsfoBNH-ixtWe9sPIcU0ELRtWhsBG1kY6WgMPExxhHTsGkQkdyst67zc/exec"
+
+// ==============================
+// データの保存
+// ==============================
+
+function saveProgress() {
+  const data = {
+    conditions: conditions,
+    results: results,
+    trial: trial,
+    currentScreen: currentScreen
+  };
+
+  localStorage.setItem(
+    storageKey,
+    JSON.stringify(data)
+  );
+}
+
+
+// ==============================
+// データの読み込み
+// ==============================
+
+function loadProgress() {
+  const savedData = localStorage.getItem(storageKey);
+
+  if (savedData === null) {
+    return false;
+  }
+
+  try {
+    const data = JSON.parse(savedData);
+
+    if (
+      !Array.isArray(data.conditions) ||
+      !Array.isArray(data.results) ||
+      data.conditions.length !== 20 ||
+      data.results.length > 20 ||
+      !Number.isInteger(data.trial) ||
+      data.trial < 0 ||
+      data.trial > 20 ||
+      !["ad", "result", "finish"].includes(data.currentScreen)
+    ) {
+      return false;
+    }
+
+    conditions = data.conditions;
+    results = data.results;
+    trial = data.trial;
+    currentScreen = data.currentScreen;
+
+    return true;
+
+  } catch (error) {
+    console.error("保存データの読み込みに失敗しました", error);
+    return false;
+  }
+}
+
+
+// ==============================
+// 保存データの確認
+// ==============================
+
+let hasSavedProgress = false;
+
+if (validId) {
+  hasSavedProgress = loadProgress();
+}
+
+if (hasSavedProgress) {
+  document.getElementById("resumeMessage").textContent =
+    "前回の実験データがあります。続きから再開できます。";
+
+  startButton.textContent = "続きから再開";
+}
+
+
+// ==============================
+// 条件の順番をランダムにする
+// ==============================
+
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+
+  return array;
+}
+
+
+// ==============================
+// 実験開始・再開
+// ==============================
+
+function startExperiment() {
+
+  if (!validId) {
+    return;
+  }
+
+  document.getElementById("startArea").style.display =
+    "none";
+
+  document.getElementById("message").textContent = "";
+
+  // 保存データがある場合
+  if (hasSavedProgress) {
+
+    if (currentScreen === "finish") {
+      finishExperiment();
+      return;
+    }
+
+    if (currentScreen === "result") {
+      showResult();
+      return;
+    }
+
+    if (currentScreen === "ad") {
+      showAd();
+      return;
+    }
+  }
+
+  // 新しい実験を開始する場合
+  conditions = [];
+
+  for (let i = 0; i < 10; i++) {
+    conditions.push("right");
+    conditions.push("left");
+  }
+
+  shuffle(conditions);
+
+  results = [];
+  trial = 0;
+
+  showAd();
+}
+
+
+// ==============================
+// 広告を表示する
+// ==============================
+
+function showAd() {
+
+  if (trial >= 20) {
+    finishExperiment();
+    return;
+  }
+
+  currentCondition = conditions[trial];
+
+  const closeButton =
+    document.getElementById("closeButton");
+
+  closeButton.className = "";
+
+  if (currentCondition === "left") {
+    closeButton.classList.add("left");
+  } else {
+    closeButton.classList.add("right");
+  }
+
+  document.getElementById("progress").textContent =
+    `${trial + 1} / 20 回目`;
+
+  document.getElementById("resultArea").style.display =
+    "none";
+
+  document.getElementById("finishArea").style.display =
+    "none";
+
+  document.getElementById("adArea").style.display =
+    "block";
+
+  currentScreen = "ad";
+
+  saveProgress();
+
+  // 広告が表示されてから計測を開始する
+  requestAnimationFrame(() => {
+    startTime = performance.now();
+  });
+}
+
+
+// ==============================
+// ×ボタンを押したとき
+// ==============================
+
+function closeAd() {
+
+  if (currentScreen !== "ad") {
+    return;
+  }
+
+  const endTime = performance.now();
+
+  const elapsedTime = endTime - startTime;
+
+  results.push({
+    trial: trial + 1,
+    condition: currentCondition,
+    time: elapsedTime
+  });
+
+  currentScreen = "result";
+
+  saveProgress();
+
+  document.getElementById("adArea").style.display =
+    "none";
+
+  showResult();
+}
+
+
+// ==============================
+// 結果を表示する
+// ==============================
+
+function showResult() {
+
+  document.getElementById("adArea").style.display =
+    "none";
+
+  document.getElementById("finishArea").style.display =
+    "none";
+
+  document.getElementById("resultArea").style.display =
+    "block";
+
+  const lastResult = results[results.length - 1];
+
+  document.getElementById("resultText").textContent =
+    `今回の反応時間：${lastResult.time.toFixed(2)} ms`;
+
+  document.getElementById("progress").textContent =
+    `${trial + 1} / 20 回目`;
+}
+
+
+// ==============================
+// 次の試行へ
+// ==============================
+
+function nextTrial() {
+
+  if (currentScreen !== "result") {
+    return;
+  }
+
+  trial++;
+
+  if (trial >= 20) {
+    finishExperiment();
+    return;
+  }
+
+  showAd();
+}
+
+
+// ==============================
+// 実験終了
+// ==============================
+
+function finishExperiment() {
+
+  currentScreen = "finish";
+
+  saveProgress();
+
+    sendResultsToSheet();
+
+  document.getElementById("startArea").style.display =
+    "none";
+
+  document.getElementById("adArea").style.display =
+    "none";
+
+  document.getElementById("resultArea").style.display =
+    "none";
+
+  document.getElementById("finishArea").style.display =
+    "block";
+
+  document.getElementById("progress").textContent =
+    "20 / 20 回目";
+}
+
+async function sendResultsToSheet() {
+  const data = {
+    participantId: participantId,
+    results: results
+  };
+
+  try {
+    await fetch(scriptURL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body: JSON.stringify(data)
+    });
+
+    document.getElementById("message").textContent =
+      "データ送信を実行しました。";
+
+  } catch (error) {
+    document.getElementById("message").textContent =
+      "送信に失敗しました。CSVも保存してください。";
+
+    console.error(error);
+  }
+}
+// ==============================
+// CSVファイルのダウンロード
+// ==============================
+
+function downloadCSV() {
+
+  let csv = "参加者番号,試行回数,ボタン位置,反応時間(ms)\n";
+
+  results.forEach(result => {
+
+    const position =
+      result.condition === "right" ? "右上" : "左上";
+
+    csv +=
+      `${participantId},${result.trial},${position},${result.time.toFixed(2)}\n`;
+  });
+
+  // Excelで文字化けしにくいようにBOMを付ける
+  const bom = "\uFEFF";
+
+  const blob = new Blob(
+    [bom + csv],
+    { type: "text/csv;charset=utf-8;" }
+  );
+
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `${participantId}_result.csv`;
+
+  document.body.appendChild(link);
+
+  link.click();
+
+  document.body.removeChild(link);
+
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+</script>
+
+</body>
+</html>
